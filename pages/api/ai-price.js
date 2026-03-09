@@ -1,4 +1,3 @@
-// pages/api/ai-price.js
 export default async function handler(req, res) {
   if (req.method !== "POST") return res.status(405).json({ error: "Method not allowed" });
 
@@ -29,41 +28,50 @@ ${items}
 Respond ONLY with a valid JSON array, nothing else:
 [{"description":"item name","unitPrice":1234,"confidence":"high","notes":"what is included"}]`;
 
-  const models = ["gemini-2.0-flash", "gemini-1.5-flash", "gemini-1.5-flash-latest", "gemini-pro"];
+  var models = ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash", "gemini-pro"];
+  var lastError = "";
 
-  for (const model of models) {
+  for (var i = 0; i < models.length; i++) {
+    var model = models[i];
     try {
-      const response = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${API_KEY}`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            contents: [{ parts: [{ text: prompt }] }],
-            generationConfig: { temperature: 0.3, maxOutputTokens: 4096 },
-          }),
-        }
-      );
+      var url = "https://generativelanguage.googleapis.com/v1beta/models/" + model + ":generateContent?key=" + API_KEY;
+      
+      var response = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          contents: [{ parts: [{ text: prompt }] }],
+          generationConfig: { temperature: 0.3, maxOutputTokens: 4096 }
+        })
+      });
 
       if (!response.ok) {
-        console.error(`${model} failed: ${response.status}`);
+        lastError = model + " status " + response.status;
         continue;
       }
 
-      const data = await response.json();
-      const text = data.candidates?.[0]?.content?.parts?.[0]?.text || "";
-      const clean = text.replace(/```json|```/g, "").trim();
-      const match = clean.match(/\[[\s\S]*?\]/);
+      var data = await response.json();
+      
+      var text = "";
+      if (data.candidates && data.candidates.length > 0) {
+        var candidate = data.candidates[0];
+        if (candidate.content && candidate.content.parts && candidate.content.parts.length > 0) {
+          text = candidate.content.parts[0].text || "";
+        }
+      }
+      
+      var clean = text.replace(/```json/g, "").replace(/```/g, "").trim();
+      var match = clean.match(/\[[\s\S]*?\]/);
 
       if (match) {
-        return res.status(200).json({ results: JSON.parse(match[0]), mode, model });
+        return res.status(200).json({ results: JSON.parse(match[0]), mode: mode, model: model });
       }
-      return res.status(200).json({ results: [], mode, model });
+      return res.status(200).json({ results: [], mode: mode, model: model });
     } catch (e) {
-      console.error(`${model} error:`, e.message);
+      lastError = model + " error: " + e.message;
       continue;
     }
   }
 
-  return res.status(500).json({ error: "All models failed. Check API key." });
+  return res.status(500).json({ error: "All models failed. Last: " + lastError });
 }
