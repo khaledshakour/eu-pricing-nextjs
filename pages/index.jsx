@@ -147,12 +147,14 @@ cur.items.push({id:`i-${i}-${Math.random().toString(36).substr(2,4)}`,descriptio
 if(cur.items.length>0)sections.push(cur);return sections}
 
 async function getAIPricing(sections){
-  const list=sections.flatMap(s=>[`\n[Section: ${s.name} — Scope: ${s.scope}]`,...s.items.map(i=>`- ${i.description} | Qty:${i.qty} | Unit:${i.unit}`)]).join("\n");
+  const allItems=sections.flatMap(s=>s.items);
+  const list=allItems.map((i,idx)=>`${idx+1}. ${i.description} | Qty:${i.qty} | Unit:${i.unit}`).join("\n");
+  const scopeInfo=sections.map(s=>`Section "${s.name}" scope: ${s.scope}`).join("; ");
   try{
     const r=await fetch("/api/ai-price",{
       method:"POST",
       headers:{"Content-Type":"application/json"},
-      body:JSON.stringify({items:list,mode:"ai"})
+      body:JSON.stringify({items:`${scopeInfo}\n\nItems (return prices in SAME ORDER):\n${list}`,mode:"ai"})
     });
     if(!r.ok){console.error("AI API status:",r.status);return null}
     const d=await r.json();
@@ -161,12 +163,13 @@ async function getAIPricing(sections){
 }
 
 async function getWebPricing(sections){
-  const items=sections.flatMap(s=>s.items).slice(0,15).map(i=>i.description.replace(/\(.*?\)/g,"").trim());
+  const allItems=sections.flatMap(s=>s.items).slice(0,15);
+  const list=allItems.map((i,idx)=>`${idx+1}. ${i.description.replace(/\(.*?\)/g,"").trim()}`).join("\n");
   try{
     const r=await fetch("/api/ai-price",{
       method:"POST",
       headers:{"Content-Type":"application/json"},
-      body:JSON.stringify({items:items.join("\n"),mode:"web"})
+      body:JSON.stringify({items:`Return prices in SAME ORDER:\n${list}`,mode:"web"})
     });
     if(!r.ok){console.error("Web API status:",r.status);return null}
     const d=await r.json();
@@ -196,7 +199,7 @@ function Header({activeTab,setActiveTab,lang,setLang,t}){return(
 
 function Results({sections,src,color,icon,label,loading,total,t,error}){
   if(loading)return(<div style={{background:S.white,borderRadius:11,border:`1px solid ${S.gl}`,padding:"35px 18px",textAlign:"center"}}><div style={{width:24,height:24,border:`3px solid ${color}30`,borderTopColor:color,borderRadius:"50%",animation:"spin 0.8s linear infinite",margin:"0 auto 10px"}}/><div style={{fontSize:13,fontWeight:700,color,fontFamily:S.font}}>{icon} {t.pricingFrom} {label}...</div><div style={{fontSize:10,color:S.gray,fontFamily:S.font,marginTop:3}}>{t.takesSec}</div></div>);
-  if(error)return(<div style={{background:S.white,borderRadius:11,border:`1px solid #fca5a5`,padding:"20px 18px",textAlign:"center"}}><div style={{fontSize:24,marginBottom:6}}>⚠️</div><div style={{fontSize:12,color:S.red,fontFamily:S.font,fontWeight:600}}>{icon} {t.noData} {label}</div><div style={{fontSize:10,color:S.gray,fontFamily:S.font,marginTop:4}}>يعمل في معاينة claude.ai — Works in claude.ai preview</div></div>);
+  if(error)return(<div style={{background:S.white,borderRadius:11,border:`1px solid #fca5a5`,padding:"20px 18px",textAlign:"center"}}><div style={{fontSize:24,marginBottom:6}}>⚠️</div><div style={{fontSize:12,color:S.red,fontFamily:S.font,fontWeight:600}}>{icon} {t.noData} {label}</div><div style={{fontSize:10,color:S.gray,fontFamily:S.font,marginTop:4}}>{lang==="ar"?"حدث خطأ — جرّب مرة أخرى":"An error occurred — try again"}</div></div>);
   if(!sections||!sections.length)return(<div style={{background:S.white,borderRadius:11,border:`1px solid ${S.gl}`,padding:"25px 18px",textAlign:"center"}}><div style={{fontSize:12,color:S.gray,fontFamily:S.font}}>{icon} {t.noData} {label}</div></div>);
   return(<div style={{background:S.white,borderRadius:11,border:`1px solid ${S.gl}`,overflow:"hidden"}}>
   <div style={{padding:"10px 14px",borderBottom:`1px solid ${S.gl}`,display:"flex",justifyContent:"space-between",alignItems:"center",background:`${color}08`}}>
@@ -232,9 +235,11 @@ function PricingTab({onSave,goToQuotations,learnedItems,lang,t}){
     else{r.onload=e=>{setInputText(e.target.result);setFStatus("done")};r.readAsText(file)}};
 
   const analyze=async()=>{if(!inputText.trim())return;const secs=parseInput(inputText);setParsed(secs);setSrc("all");setAiError(false);setWebError(false);setAiR(null);setWebR(null);setTimeout(()=>resRef.current?.scrollIntoView({behavior:"smooth"}),200);
+    // Flatten items for index matching
+    const allItems=secs.flatMap(s=>s.items);
     setLDb(true);setTimeout(()=>{setDbR(secs.map(s=>({...s,items:s.items.map(i=>{const m=matchDB(i.description,learnedItems);return{...i,unitPrice:i.originalPrice>0?i.originalPrice:(m?.price||0),matched:!!m}})})));setLDb(false)},800);
-    setLAi(true);try{const ai=await getAIPricing(secs);if(ai){setAiR(secs.map(s=>({...s,items:s.items.map(i=>{const f=ai.find(p=>i.description.toLowerCase().includes(p.description?.toLowerCase()?.split(" ")[0]||"___"))||ai.find(p=>i.description.toLowerCase().split(/\s+/).some(w=>w.length>3&&(p.description||"").toLowerCase().includes(w)));return{...i,unitPrice:f?.unitPrice||0,confidence:f?.confidence||"low",notes:f?.notes||""}})})))}else{setAiError(true)}}catch(e){console.error(e);setAiError(true)}setLAi(false);
-    setLWeb(true);try{const wp=await getWebPricing(secs);if(wp){setWebR(secs.map(s=>({...s,items:s.items.map(i=>{const f=wp.find(p=>i.description.toLowerCase().includes(p.description?.toLowerCase()?.split(" ")[0]||"___"))||wp.find(p=>i.description.toLowerCase().split(/\s+/).some(w=>w.length>3&&(p.description||"").toLowerCase().includes(w)));return{...i,unitPrice:f?.unitPrice||0,source:f?.source||"",notes:f?.notes||""}})})))}else{setWebError(true)}}catch(e){console.error(e);setWebError(true)}setLWeb(false)};
+    setLAi(true);try{const ai=await getAIPricing(secs);if(ai&&ai.length>0){let idx=0;setAiR(secs.map(s=>({...s,items:s.items.map(i=>{const aiItem=ai[idx]||ai.find(p=>{const d=(p.description||"").toLowerCase();const id=i.description.toLowerCase();return id.includes(d.split(" ")[0])||d.includes(id.split(" ")[0])||id.split(/\s+/).filter(w=>w.length>3).some(w=>d.includes(w))})||{};idx++;return{...i,unitPrice:aiItem.unitPrice||0,confidence:aiItem.confidence||"low",notes:aiItem.notes||""}})})))}else{setAiError(true)}}catch(e){console.error(e);setAiError(true)}setLAi(false);
+    setLWeb(true);try{const wp=await getWebPricing(secs);if(wp&&wp.length>0){let idx=0;setWebR(secs.map(s=>({...s,items:s.items.map(i=>{const wItem=wp[idx]||wp.find(p=>{const d=(p.description||"").toLowerCase();const id=i.description.toLowerCase();return id.includes(d.split(" ")[0])||d.includes(id.split(" ")[0])||id.split(/\s+/).filter(w=>w.length>3).some(w=>d.includes(w))})||{};idx++;return{...i,unitPrice:wItem.unitPrice||0,source:wItem.source||"",notes:wItem.notes||""}})})))}else{setWebError(true)}}catch(e){console.error(e);setWebError(true)}setLWeb(false)};
 
   const calc=(s)=>s?s.reduce((a,sec)=>a+sec.items.reduce((b,i)=>b+(i.qty||1)*(i.unitPrice||0),0),0):0;
   const sources=[{id:"all",label:t.showAll,icon:"📊",c:S.dark},{id:"db",label:t.db,icon:"💾",c:S.green},{id:"ai",label:t.ai,icon:"🤖",c:S.purple},{id:"web",label:t.web,icon:"🌐",c:S.blue},{id:"compare",label:t.compare,icon:"⚖️",c:S.gold}];
